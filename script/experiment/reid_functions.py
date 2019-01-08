@@ -138,7 +138,7 @@ def compute_dist(array1, array2, type='euclidean'):
 def extract_DB_features(ext, cfg, root='/home/bmsknight/triplet/person-reid-triplet-loss-baseline/data/ourdata/Database/Dynamic_Database/'):
     folder_list = os.listdir(root)
     
-    global_feature_list = None
+    global_feature_list = np.asarray([])
     name_list = []
     for name in folder_list:
         glist = []
@@ -152,7 +152,7 @@ def extract_DB_features(ext, cfg, root='/home/bmsknight/triplet/person-reid-trip
             feature = ext.extract(input_image)
             glist.append(feature)
         glist = np.asarray(glist).reshape(-1,2048)
-        if global_feature_list == None:
+        if global_feature_list.shape == (0,):
             global_feature_list = glist
         else:
             global_feature_list= np.vstack((global_feature_list, glist))
@@ -171,3 +171,87 @@ def findPerson(filepath, ext, cfg, db_name_list, db_feature_list):
     cos_dist = compute_dist(db_feature_list, querry_feature, type='cosine')
     cos_pred = db_name_list[np.argmax(cos_dist)]
     return cos_pred
+
+def extract_querry_features(ext, cfg, querrypath = "/home/bmsknight/triplet/person-reid-triplet-loss-baseline/data/ourdata/Database/query3/"):
+    q_list =[]
+    querry_name_list = []
+    for filename in sorted(os.listdir(querrypath)):
+        querry_image = np.asarray(PIL.Image.open(querrypath+filename))
+        querry_image = pre_process_im(cfg, querry_image)
+        querry_image = np.reshape(querry_image,(1,3,256,128))
+        querry_feature = ext.extract(querry_image)
+        q_list.append(querry_feature)
+        querry_name_list.append(filename)
+
+    querry_feature_list = np.asarray(q_list).reshape(-1,2048)
+    return querry_name_list, querry_feature_list
+
+def re_ranking(q_g_dist, q_q_dist, g_g_dist, k1=20, k2=6, lambda_value=0.3):
+
+    # The following naming, e.g. gallery_num, is different from outer scope.
+    # Don't care about it.
+
+    original_dist = np.concatenate(
+      [np.concatenate([q_q_dist, q_g_dist], axis=1),
+       np.concatenate([q_g_dist.T, g_g_dist], axis=1)],
+      axis=0)
+    original_dist = np.power(original_dist, 2).astype(np.float32)
+    original_dist = np.transpose(1. * original_dist/np.max(original_dist,axis = 0))
+    V = np.zeros_like(original_dist).astype(np.float32)
+    initial_rank = np.argsort(original_dist).astype(np.int32)
+
+    query_num = q_g_dist.shape[0]
+    gallery_num = q_g_dist.shape[0] + q_g_dist.shape[1]
+    all_num = gallery_num
+
+    for i in range(all_num):
+        # k-reciprocal neighbors
+        forward_k_neigh_index = initial_rank[i,:k1+1]
+        backward_k_neigh_index = initial_rank[forward_k_neigh_index,:k1+1]
+        fi = np.where(backward_k_neigh_index==i)[0]
+        k_reciprocal_index = forward_k_neigh_index[fi]
+        k_reciprocal_expansion_index = k_reciprocal_index
+        for j in range(len(k_reciprocal_index)):
+            candidate = k_reciprocal_index[j]
+            candidate_forward_k_neigh_index = initial_rank[candidate,:int(np.around(k1/2.))+1]
+            candidate_backward_k_neigh_index = initial_rank[candidate_forward_k_neigh_index,:int(np.around(k1/2.))+1]
+            fi_candidate = np.where(candidate_backward_k_neigh_index == candidate)[0]
+            candidate_k_reciprocal_index = candidate_forward_k_neigh_index[fi_candidate]
+            if len(np.intersect1d(candidate_k_reciprocal_index,k_reciprocal_index))> 2./3*len(candidate_k_reciprocal_index):
+                k_reciprocal_expansion_index = np.append(k_reciprocal_expansion_index,candidate_k_reciprocal_index)
+
+        k_reciprocal_expansion_index = np.unique(k_reciprocal_expansion_index)
+        weight = np.exp(-original_dist[i,k_reciprocal_expansion_index])
+        V[i,k_reciprocal_expansion_index] = 1.*weight/np.sum(weight)
+    original_dist = original_dist[:query_num,]
+    if k2 != 1:
+        V_qe = np.zeros_like(V,dtype=np.float32)
+        for i in range(all_num):
+            V_qe[i,:] = np.mean(V[initial_rank[i,:k2],:],axis=0)
+        V = V_qe
+        del V_qe
+    del initial_rank
+    invIndex = []
+    for i in range(gallery_num):
+        invIndex.append(np.where(V[:,i] != 0)[0])
+
+    jaccard_dist = np.zeros_like(original_dist,dtype = np.float32)
+
+
+    for i in range(query_num):
+        temp_min = np.zeros(shape=[1,gallery_num],dtype=np.float32)
+        indNonZero = np.where(V[i,:] != 0)[0]
+        indImages = []
+        indImages = [invIndex[ind] for ind in indNonZero]
+        for j in range(len(indNonZero)):
+            temp_min[0,indImages[j]] = temp_min[0,indImages[j]]+ np.minimum(V[i,indNonZero[j]],V[indImages[j],indNonZero[j]])
+        jaccard_dist[i] = 1-temp_min/(2.-temp_min)
+
+    final_dist = jaccard_dist*(1-lambda_value) + original_dist*lambda_value
+    del original_dist
+    del V
+    del jaccard_dist
+    final_dist = final_dist[:query_num,query_num:]
+    return final_dist
+
+    
