@@ -19,12 +19,12 @@ load_state_dict(model, sd)
 
 ext = ExtractFeature(model=model_w,TVT=TVT)
 root_directory = '/home/bmsknight/triplet/person-reid-triplet-loss-baseline/data/ourdata/Database/Dynamic_Database/'
-db_name_list, db_feature_list = extract_DB_features(ext,root_directory)
+db_name_list, db_feature_list = extract_DB_features(ext,cfg,root_directory)
 
 querrypath = "/home/bmsknight/triplet/person-reid-triplet-loss-baseline/data/ourdata/Database/query3/"
 for filename in sorted(os.listdir(querrypath)):
     filepath = querrypath+filename
-    person = findPerson(filepath, ext, db_name_list, db_feature_list)
+    person = findPerson(filepath, ext, cfg, db_name_list, db_feature_list)
     
     print(filename, person)
 

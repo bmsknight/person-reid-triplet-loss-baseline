@@ -135,15 +135,15 @@ def compute_dist(array1, array2, type='euclidean'):
         return dist
     
 
-def extract_DB_features(ext,root='/home/bmsknight/triplet/person-reid-triplet-loss-baseline/data/ourdata/Database/Dynamic_Database/'):
-    folder_list = os.listdir(root_directory)
+def extract_DB_features(ext, cfg, root='/home/bmsknight/triplet/person-reid-triplet-loss-baseline/data/ourdata/Database/Dynamic_Database/'):
+    folder_list = os.listdir(root)
     
     global_feature_list = None
     name_list = []
     for name in folder_list:
         glist = []
 
-        directory = root_directory + name + '/'
+        directory = root + name + '/'
 
         for filename in os.listdir(directory):
             input_image = np.asarray(PIL.Image.open(directory+filename))
@@ -162,7 +162,7 @@ def extract_DB_features(ext,root='/home/bmsknight/triplet/person-reid-triplet-lo
     return name_list, global_feature_list
 
 
-def findPerson(filepath, ext, db_name_list, db_feature_list):
+def findPerson(filepath, ext, cfg, db_name_list, db_feature_list):
     querry_image = np.asarray(PIL.Image.open(filepath))
     querry_image = pre_process_im(cfg, querry_image)
     querry_image = np.reshape(querry_image,(1,3,256,128))
