@@ -146,6 +146,8 @@ def extract_DB_features(ext, cfg, root='/home/bmsknight/triplet/person-reid-trip
         directory = root + name + '/'
 
         for filename in os.listdir(directory):
+            if(filename.startswith('.')):
+                continue
             input_image = np.asarray(PIL.Image.open(directory+filename))
             input_image = pre_process_im(cfg, input_image)
             input_image = np.reshape(input_image,(1,3,256,128))
@@ -158,7 +160,7 @@ def extract_DB_features(ext, cfg, root='/home/bmsknight/triplet/person-reid-trip
             global_feature_list= np.vstack((global_feature_list, glist))
 
         name_list = name_list + ([name] * glist.shape[0])
-        
+    name_list = np.asarray(name_list)    
     return name_list, global_feature_list
 
 
@@ -176,14 +178,17 @@ def extract_querry_features(ext, cfg, querrypath = "/home/bmsknight/triplet/pers
     q_list =[]
     querry_name_list = []
     for filename in sorted(os.listdir(querrypath)):
+        if(filename.startswith('.')):
+                continue
         querry_image = np.asarray(PIL.Image.open(querrypath+filename))
         querry_image = pre_process_im(cfg, querry_image)
         querry_image = np.reshape(querry_image,(1,3,256,128))
         querry_feature = ext.extract(querry_image)
         q_list.append(querry_feature)
-        querry_name_list.append(filename)
+        querry_name_list.append(filename[:-4].split("_"))
 
     querry_feature_list = np.asarray(q_list).reshape(-1,2048)
+    querry_name_list = np.asarray(querry_name_list)
     return querry_name_list, querry_feature_list
 
 def re_ranking(q_g_dist, q_q_dist, g_g_dist, k1=20, k2=6, lambda_value=0.3):
@@ -254,4 +259,53 @@ def re_ranking(q_g_dist, q_q_dist, g_g_dist, k1=20, k2=6, lambda_value=0.3):
     final_dist = final_dist[:query_num,query_num:]
     return final_dist
 
+def copy_n_frames(n,previous_frame, query_path, temp_path):
+    file_list = os.listdir(query_path)
+    if('.ipynb_checkpoints' in file_list):
+        file_list.remove('.ipynb_checkpoints')
+    total_frame_list = [int(i[:-4].split('_')[0]) for i in file_list]
     
+    for k in range(len(file_list)):
+        if ((total_frame_list[k] <= previous_frame+n) & (total_frame_list[k]>previous_frame)):
+            os.rename(query_path + file_list[k], temp_path + file_list[k])
+    return
+    
+def vote_for_person(reranked_list,querry_name_list,db_name_list):
+    frames = list(set(querry_name_list[:,0].tolist()))
+    voting_dictionary = {}
+    voting_name_list = np.asarray(list(set(db_name_list)))
+    no_of_candidates = voting_name_list.shape[0]
+    for frame in frames:
+        frame_dist_list = reranked_list[querry_name_list[:,0]== frame]
+        frame_name_list = querry_name_list[querry_name_list[:,0]== frame]
+        no_of_persons = frame_name_list.shape[0]
+        # print(no_of_persons)
+        # print(frame_name_list)
+        for bb in range(min(no_of_persons,no_of_candidates)):
+            min_index = np.unravel_index(np.argmin(frame_dist_list),frame_dist_list.shape)
+            query_id = frame_name_list[min_index[0],1]
+            person_name = db_name_list[min_index[1]]
+            # print(frame,query_id,person_name)
+            frame_dist_list[min_index[0],:]=1
+            frame_dist_list[:,db_name_list==person_name]=1
+            if (query_id not in voting_dictionary.keys()):
+                voting_dictionary[query_id] = np.zeros(no_of_candidates)
+            voting_dictionary[query_id] = voting_dictionary[query_id] + (voting_name_list==person_name)
+            
+    return voting_dictionary,voting_name_list
+
+def find_valid_persons(voting_dictionary,voting_name_list,querry_name_list,no_of_frames):
+    display_dictionary = {}
+    coordinate_dictionary = {}
+    centroid_dictionary = {}
+    for key in voting_dictionary:
+        if (np.max(voting_dictionary[key])>(no_of_frames/2)):
+            person = voting_name_list[np.argmax(voting_dictionary[key])]
+            display_dictionary[key] = person
+            coordinates = querry_name_list[querry_name_list[:,1] == key]
+            median_coordinates = np.median(coordinates[:,2:],axis=0)
+            coordinate_dictionary[person] = median_coordinates
+            centroid_dictionary[person] = tuple((int((median_coordinates[2] + median_coordinates[3])/2),int((median_coordinates[0] + median_coordinates[1])/2)))
+    return display_dictionary, coordinate_dictionary, centroid_dictionary
+
+            
